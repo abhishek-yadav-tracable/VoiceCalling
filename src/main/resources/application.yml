@@ -1,0 +1,106 @@
+spring:
+  application:
+    name: voice-campaign-service
+
+  datasource:
+    url: jdbc:h2:mem:voicecampaign;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 20
+      connection-timeout: 5000
+
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.H2Dialect
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+
+server:
+  port: 8081
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+
+# Application specific configuration
+voice-campaign:
+  scheduler:
+    enabled: true
+    fixed-rate-ms: 100
+    batch-size: 10000
+  
+  worker:
+    pool-size: 100
+    queue-poll-timeout-ms: 500
+    max-queue-depth: 50000
+  
+  defaults:
+    concurrency-limit: 10
+    max-retries: 3
+    sync-initial-backoff-ms: 1000
+    sync-backoff-multiplier: 2.0
+    callback-retry-delay-ms: 30000
+    callback-timeout-ms: 120000
+  
+  telephony:
+    mock-enabled: true
+    mock-min-duration-ms: 3000
+    mock-max-duration-ms: 10000
+    mock-callback-failure-rate: 0.05
+    mock-no-callback-rate: 0.01
+    mock-sync-failure-rate: 0.005
+
+# Resilience4j configuration
+resilience4j:
+  circuitbreaker:
+    instances:
+      telephonyService:
+        registerHealthIndicator: true
+        slidingWindowSize: 100
+        minimumNumberOfCalls: 50
+        permittedNumberOfCallsInHalfOpenState: 10
+        automaticTransitionFromOpenToHalfOpenEnabled: true
+        waitDurationInOpenState: 5s
+        failureRateThreshold: 80
+        eventConsumerBufferSize: 100
+
+  ratelimiter:
+    instances:
+      telephonyService:
+        limitForPeriod: 10000
+        limitRefreshPeriod: 1s
+        timeoutDuration: 0
+
+  retry:
+    instances:
+      telephonyService:
+        maxAttempts: 3
+        waitDuration: 1s
+        enableExponentialBackoff: true
+        exponentialBackoffMultiplier: 2
+
+logging:
+  level:
+    org.example.voicecampaign: DEBUG
+    org.springframework.data: INFO
