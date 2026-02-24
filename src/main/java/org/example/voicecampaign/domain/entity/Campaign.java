@@ -1,7 +1,13 @@
 package org.example.voicecampaign.domain.entity;
 
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.ToString;
 import org.example.voicecampaign.domain.model.BusinessHours;
 import org.example.voicecampaign.domain.model.CampaignStatus;
 import org.example.voicecampaign.domain.model.RetryConfig;
@@ -13,10 +19,12 @@ import java.util.UUID;
 
 @Entity
 @Table(name = "campaigns")
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@ToString(exclude = "callRequests")
 @EqualsAndHashCode(of = "id")
 public class Campaign {
 

@@ -13,7 +13,6 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -33,8 +32,10 @@ public class CampaignController {
     }
 
     @GetMapping
-    public ResponseEntity<List<CampaignResponse>> getAllCampaigns() {
-        return ResponseEntity.ok(campaignService.getAllCampaigns());
+    public ResponseEntity<List<CampaignResponse>> getAllCampaigns(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "100") int size) {
+        return ResponseEntity.ok(campaignService.getAllCampaigns(page, size));
     }
 
     @GetMapping("/{campaignId}")

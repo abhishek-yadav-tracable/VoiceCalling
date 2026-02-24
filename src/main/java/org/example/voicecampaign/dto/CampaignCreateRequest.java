@@ -41,8 +41,10 @@ public class CampaignCreateRequest {
     @Builder.Default
     private Integer priority = 5;
     
+    @jakarta.validation.Valid
     private RetryConfigDto retryConfig;
     
+    @jakarta.validation.Valid
     private BusinessHoursDto businessHours;
     
     @Data

@@ -1,7 +1,13 @@
 package org.example.voicecampaign.domain.entity;
 
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import lombok.ToString;
 import org.example.voicecampaign.domain.model.CallStatus;
 
 import java.time.Instant;
@@ -11,12 +17,15 @@ import java.util.UUID;
 @Table(name = "call_requests", indexes = {
     @Index(name = "idx_call_campaign_status", columnList = "campaign_id, status"),
     @Index(name = "idx_call_status_retry", columnList = "status, retry_count, next_retry_at"),
-    @Index(name = "idx_call_expected_callback", columnList = "status, expected_callback_by")
+    @Index(name = "idx_call_expected_callback", columnList = "status, expected_callback_by"),
+    @Index(name = "idx_call_external_id", columnList = "externalCallId")
 })
-@Data
+@Getter
+@Setter
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@ToString(exclude = "campaign")
 @EqualsAndHashCode(of = "id")
 public class CallRequest {
 

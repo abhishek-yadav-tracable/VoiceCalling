@@ -2,6 +2,7 @@ package org.example.voicecampaign.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.example.voicecampaign.dto.CallResponse;
 import org.example.voicecampaign.dto.CallbackRequest;
 import org.example.voicecampaign.dto.TriggerCallRequest;
@@ -16,6 +17,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/api/v1/calls")
 @RequiredArgsConstructor
+@Slf4j
 public class CallController {
 
     private final CallService callService;
@@ -34,6 +36,8 @@ public class CallController {
 
     @PostMapping("/callback")
     public ResponseEntity<Void> handleCallback(@Valid @RequestBody CallbackRequest request) {
+        log.info("Received callback request: externalCallId={}, status={}", 
+                request.getExternalCallId(), request.getStatus());
         callService.handleCallback(request);
         return ResponseEntity.ok().build();
     }

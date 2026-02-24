@@ -89,6 +89,12 @@
       <version>8.7.0</version>
     </dependency>
 
+    <!-- Caffeine cache for bounded rate limiting buckets -->
+    <dependency>
+      <groupId>com.github.ben-manes.caffeine</groupId>
+      <artifactId>caffeine</artifactId>
+    </dependency>
+
     <!-- Lombok edge build for JDK 21 compatibility -->
     <dependency>
       <groupId>org.projectlombok</groupId>

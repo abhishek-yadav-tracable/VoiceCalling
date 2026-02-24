@@ -3,7 +3,6 @@ package org.example.voicecampaign.scheduler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.voicecampaign.domain.entity.CallRequest;
-import org.example.voicecampaign.domain.entity.Campaign;
 import org.example.voicecampaign.dto.CallbackRequest;
 import org.example.voicecampaign.repository.CallRequestRepository;
 import org.example.voicecampaign.service.CallService;
@@ -14,6 +13,19 @@ import org.springframework.stereotype.Component;
 import java.time.Instant;
 import java.util.List;
 
+/**
+ * Monitors for calls that have not received a callback within the expected timeout.
+ * 
+ * <p>Runs periodically to detect IN_PROGRESS calls whose {@code expectedCallbackBy} timestamp
+ * has passed. These calls are treated as failed due to callback timeout and are marked for retry.</p>
+ * 
+ * <p>This handles scenarios where:</p>
+ * <ul>
+ *   <li>Telephony provider fails to send a callback</li>
+ *   <li>Callback is lost due to network issues</li>
+ *   <li>Application restarts while calls are in progress</li>
+ * </ul>
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -25,7 +37,10 @@ public class CallbackWatchdog {
     @Value("${voice-campaign.scheduler.enabled:true}")
     private boolean schedulerEnabled;
 
-    @Scheduled(fixedRate = 30000) // Run every 30 seconds
+    /**
+     * Scheduled task that checks for and handles timed-out calls.
+     */
+    @Scheduled(fixedRateString = "${voice-campaign.watchdog.fixed-rate-ms:30000}")
     public void checkForTimedOutCalls() {
         if (!schedulerEnabled) {
             return;

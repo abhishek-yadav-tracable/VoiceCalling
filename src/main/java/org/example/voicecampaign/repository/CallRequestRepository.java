@@ -64,6 +64,10 @@ public interface CallRequestRepository extends JpaRepository<CallRequest, UUID> 
     @Query("SELECT cr.phoneNumber FROM CallRequest cr WHERE cr.campaign.id = :campaignId")
     List<String> findPhoneNumbersByCampaignId(@Param("campaignId") UUID campaignId);
 
+    @Query("SELECT CASE WHEN COUNT(cr) > 0 THEN true ELSE false END FROM CallRequest cr " +
+           "WHERE cr.campaign.id = :campaignId AND cr.phoneNumber = :phoneNumber")
+    boolean existsByCampaignIdAndPhoneNumber(@Param("campaignId") UUID campaignId, @Param("phoneNumber") String phoneNumber);
+
     long countByStatus(CallStatus status);
 
     @Query("SELECT cr FROM CallRequest cr JOIN FETCH cr.campaign WHERE cr.id = :id")

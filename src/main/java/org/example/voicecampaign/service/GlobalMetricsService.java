@@ -11,8 +11,6 @@ import org.example.voicecampaign.worker.CallWorkerPool;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.Set;
-
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -93,30 +91,6 @@ public class GlobalMetricsService {
                 .callsPerSecond(Math.round(callsPerSecond * 100.0) / 100.0)
                 .avgCallDurationSeconds(Math.round(avgCallDurationSeconds * 100.0) / 100.0)
                 .build();
-    }
-
-    private int getTotalWorkerSlots() {
-        // Sum of concurrency limits from all active (IN_PROGRESS) campaigns
-        Integer total = campaignRepository.sumConcurrencyLimitForActiveCampaigns();
-        // If no active campaigns, return 0 (utilization will show as N/A or 0%)
-        return total != null ? total : 0;
-    }
-
-    private int getActiveWorkerSlots() {
-        // Count all active slots from Redis
-        Set<String> keys = redisTemplate.keys(SLOTS_KEY_PREFIX + "*");
-        if (keys == null || keys.isEmpty()) {
-            return 0;
-        }
-        
-        int total = 0;
-        for (String key : keys) {
-            Object value = redisTemplate.opsForValue().get(key);
-            if (value != null) {
-                total += Integer.parseInt(value.toString());
-            }
-        }
-        return total;
     }
 
     public void resetMetricsStartTime() {

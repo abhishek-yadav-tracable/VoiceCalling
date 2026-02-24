@@ -1,4 +1,4 @@
-package org.example.voicecampaign.worker;
+package org.example.voicecampaign.scheduler;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -8,6 +8,7 @@ import org.example.voicecampaign.domain.model.CampaignStatus;
 import org.example.voicecampaign.repository.CallRequestRepository;
 import org.example.voicecampaign.repository.CampaignRepository;
 import org.example.voicecampaign.service.CampaignMetricsService;
+import org.example.voicecampaign.worker.CallWorkerPool;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -19,8 +20,18 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Service responsible for queuing calls to be processed by the worker pool.
- * This replaces direct call execution in the scheduler with smart queuing.
+ * Scheduler that enqueues pending and retryable calls to the Redis queue for processing.
+ * 
+ * <p>Runs on a fixed interval and performs fair distribution of calls across active campaigns,
+ * respecting per-campaign concurrency limits and business hours.</p>
+ * 
+ * <p>Key responsibilities:</p>
+ * <ul>
+ *   <li>Query DB for active campaigns within business hours</li>
+ *   <li>Fetch PENDING and FAILED (retryable) calls</li>
+ *   <li>Push call IDs to Redis queue for worker consumption</li>
+ *   <li>Track queued counts per campaign to respect concurrency limits</li>
+ * </ul>
  */
 @Service
 @RequiredArgsConstructor
@@ -45,8 +56,8 @@ public class CallQueueService {
     private static final String CAMPAIGN_QUEUED_KEY = "campaign:%s:queued";
 
     /**
-     * Periodically checks for calls to enqueue from active campaigns.
-     * Uses smart queuing to maintain optimal queue depth.
+     * Scheduled task that enqueues calls from active campaigns to the Redis queue.
+     * Runs at a fixed rate configured by {@code voice-campaign.scheduler.fixed-rate-ms}.
      */
     @Scheduled(fixedRateString = "${voice-campaign.scheduler.fixed-rate-ms:1000}")
     public void enqueueCallsForActiveCampaigns() {
@@ -101,7 +112,8 @@ public class CallQueueService {
         }
     }
 
-    private void enqueueCallsForCampaign(Campaign campaign, int maxCalls) {
+    @org.springframework.transaction.annotation.Transactional
+    protected void enqueueCallsForCampaign(Campaign campaign, int maxCalls) {
         UUID campaignId = campaign.getId();
         
         // Check concurrency limit
@@ -143,9 +155,8 @@ public class CallQueueService {
 
         int enqueued = 0;
         for (CallRequest callRequest : retryableCalls) {
-            if (tryEnqueue(campaign.getId(), callRequest.getId())) {
-                enqueued++;
-            }
+            enqueue(campaign.getId(), callRequest.getId());
+            enqueued++;
         }
         return enqueued;
     }
@@ -156,26 +167,29 @@ public class CallQueueService {
 
         int enqueued = 0;
         for (CallRequest callRequest : pendingCalls) {
-            if (tryEnqueue(campaign.getId(), callRequest.getId())) {
-                enqueued++;
-            }
+            enqueue(campaign.getId(), callRequest.getId());
+            enqueued++;
         }
         return enqueued;
     }
 
-    private boolean tryEnqueue(UUID campaignId, UUID callRequestId) {
-        // Increment queued count for this campaign
+    private void enqueue(UUID campaignId, UUID callRequestId) {
         incrementQueuedCount(campaignId);
-        
-        // Acquire a slot before enqueueing
         workerPool.enqueueCall(callRequestId);
-        return true;
     }
 
     private int getQueuedCount(UUID campaignId) {
         String key = String.format(CAMPAIGN_QUEUED_KEY, campaignId);
         String value = redisTemplate.opsForValue().get(key);
-        return value != null ? Integer.parseInt(value) : 0;
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            log.warn("Invalid queued count value for campaign {}: {}", campaignId, value);
+            return 0;
+        }
     }
 
     private void incrementQueuedCount(UUID campaignId) {
@@ -183,22 +197,4 @@ public class CallQueueService {
         redisTemplate.opsForValue().increment(key);
     }
 
-    /**
-     * Called when a call is picked up by a worker (decrements queued, increments active)
-     */
-    public void onCallStarted(UUID campaignId) {
-        String key = String.format(CAMPAIGN_QUEUED_KEY, campaignId);
-        Long newValue = redisTemplate.opsForValue().decrement(key);
-        if (newValue != null && newValue < 0) {
-            redisTemplate.opsForValue().set(key, "0");
-        }
-        metricsService.incrementActiveSlots(campaignId);
-    }
-
-    /**
-     * Called when a call completes (decrements active)
-     */
-    public void onCallCompleted(UUID campaignId) {
-        metricsService.releaseSlot(campaignId);
-    }
 }

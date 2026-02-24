@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 
 import org.example.voicecampaign.domain.model.CampaignStatus;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
@@ -32,8 +33,9 @@ public class StartupSyncService {
     private final StringRedisTemplate redisTemplate;
 
     private static final String CALL_QUEUE_KEY = "call:queue";
-    private static final String ACTIVE_SLOTS_KEY = "campaign:%s:active_slots";
-    private static final String QUEUED_KEY = "campaign:%s:queued";
+    private static final String ACTIVE_SLOTS_KEY_PATTERN = "campaign:%s:active_slots";
+    private static final String QUEUED_KEYS_GLOB = "campaign:*:queued";
+    private static final String ACTIVE_SLOTS_KEYS_GLOB = "campaign:*:active_slots";
 
     @PostConstruct
     public void syncOnStartup() {
@@ -48,7 +50,7 @@ public class StartupSyncService {
             }
 
             // 2. Clear all queued counts (will be re-populated by scheduler)
-            Set<String> queuedKeys = redisTemplate.keys("campaign:*:queued");
+            Set<String> queuedKeys = redisTemplate.keys(QUEUED_KEYS_GLOB);
             if (queuedKeys != null && !queuedKeys.isEmpty()) {
                 redisTemplate.delete(queuedKeys);
                 log.info("Cleared {} queued count keys", queuedKeys.size());
@@ -63,17 +65,17 @@ public class StartupSyncService {
                 long inProgressCount = callRequestRepository.countByCampaignIdAndStatus(
                         campaign.getId(), CallStatus.IN_PROGRESS);
                 
-                String key = String.format(ACTIVE_SLOTS_KEY, campaign.getId());
+                String key = String.format(ACTIVE_SLOTS_KEY_PATTERN, campaign.getId());
                 redisTemplate.opsForValue().set(key, String.valueOf(inProgressCount));
                 syncedCampaigns++;
             }
 
             // 4. Clear slots for inactive campaigns
-            Set<String> allSlotKeys = redisTemplate.keys("campaign:*:active_slots");
+            Set<String> allSlotKeys = redisTemplate.keys(ACTIVE_SLOTS_KEYS_GLOB);
             if (allSlotKeys != null) {
-                Set<String> activeCampaignKeys = new java.util.HashSet<>();
+                Set<String> activeCampaignKeys = new HashSet<>();
                 for (Campaign c : activeCampaigns) {
-                    activeCampaignKeys.add(String.format(ACTIVE_SLOTS_KEY, c.getId()));
+                    activeCampaignKeys.add(String.format(ACTIVE_SLOTS_KEY_PATTERN, c.getId()));
                 }
                 
                 for (String key : allSlotKeys) {

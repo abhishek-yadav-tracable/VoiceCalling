@@ -20,30 +20,37 @@ public class CampaignMetricsService {
     private final StringRedisTemplate redisTemplate;
     private final CallRequestRepository callRequestRepository;
 
+    @org.springframework.beans.factory.annotation.Value("${voice-campaign.metrics.ttl-hours:24}")
+    private long metricsTtlHours;
+
     private static final String ACTIVE_SLOTS_KEY = "campaign:%s:active_slots";
     private static final String METRICS_KEY = "campaign:%s:metrics:%s";
-    private static final long METRICS_TTL_HOURS = 24;
 
     public int getActiveSlots(UUID campaignId) {
         String key = String.format(ACTIVE_SLOTS_KEY, campaignId);
         String value = redisTemplate.opsForValue().get(key);
-        return value != null ? Integer.parseInt(value) : 0;
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            log.warn("Invalid active slots value for campaign {}: {}", campaignId, value);
+            return 0;
+        }
     }
 
-    public int incrementActiveSlots(UUID campaignId) {
+    public void incrementActiveSlots(UUID campaignId) {
         String key = String.format(ACTIVE_SLOTS_KEY, campaignId);
-        Long newValue = redisTemplate.opsForValue().increment(key);
-        return newValue != null ? newValue.intValue() : 1;
+        redisTemplate.opsForValue().increment(key);
     }
 
-    public int decrementActiveSlots(UUID campaignId) {
+    public void decrementActiveSlots(UUID campaignId) {
         String key = String.format(ACTIVE_SLOTS_KEY, campaignId);
         Long newValue = redisTemplate.opsForValue().decrement(key);
         if (newValue != null && newValue < 0) {
             redisTemplate.opsForValue().set(key, "0");
-            return 0;
         }
-        return newValue != null ? newValue.intValue() : 0;
     }
 
     public void resetActiveSlots(UUID campaignId) {
@@ -54,13 +61,21 @@ public class CampaignMetricsService {
     public void incrementMetric(UUID campaignId, String metricName) {
         String key = String.format(METRICS_KEY, campaignId, metricName);
         redisTemplate.opsForValue().increment(key);
-        redisTemplate.expire(key, METRICS_TTL_HOURS, TimeUnit.HOURS);
+        redisTemplate.expire(key, metricsTtlHours, TimeUnit.HOURS);
     }
 
     public long getMetric(UUID campaignId, String metricName) {
         String key = String.format(METRICS_KEY, campaignId, metricName);
         String value = redisTemplate.opsForValue().get(key);
-        return value != null ? Long.parseLong(value) : 0;
+        if (value == null) {
+            return 0;
+        }
+        try {
+            return Long.parseLong(value);
+        } catch (NumberFormatException e) {
+            log.warn("Invalid metric value for campaign {} metric {}: {}", campaignId, metricName, value);
+            return 0;
+        }
     }
 
     public CampaignMetrics getCampaignMetrics(UUID campaignId) {
@@ -99,15 +114,6 @@ public class CampaignMetricsService {
                 .permanentlyFailedCalls(permanentlyFailedCalls)
                 .totalRetries(totalRetries)
                 .build();
-    }
-
-    public boolean tryAcquireSlot(UUID campaignId, int concurrencyLimit) {
-        int currentSlots = getActiveSlots(campaignId);
-        if (currentSlots >= concurrencyLimit) {
-            return false;
-        }
-        incrementActiveSlots(campaignId);
-        return true;
     }
 
     public void releaseSlot(UUID campaignId) {

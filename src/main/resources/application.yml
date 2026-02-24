@@ -50,10 +50,31 @@ voice-campaign:
     fixed-rate-ms: 100
     batch-size: 10000
   
+  watchdog:
+    fixed-rate-ms: 30000
+  
   worker:
     pool-size: 100
     queue-poll-timeout-ms: 500
     max-queue-depth: 50000
+    shutdown-wait-seconds: 60
+    shutdown-termination-seconds: 10
+  
+  async:
+    core-pool-size: 10
+    max-pool-size: 50
+    queue-capacity: 500
+  
+  import:
+    batch-size: 1000
+  
+  metrics:
+    ttl-hours: 24
+  
+  rate-limit:
+    requests-per-second: 10000
+    cache-ttl-hours: 1
+    cache-max-size: 100000
   
   defaults:
     concurrency-limit: 10
@@ -65,11 +86,12 @@ voice-campaign:
   
   telephony:
     mock-enabled: true
-    mock-min-duration-ms: 3000
-    mock-max-duration-ms: 10000
+    mock-min-duration-ms: 1000
+    mock-max-duration-ms: 3000
     mock-callback-failure-rate: 0.05
     mock-no-callback-rate: 0.01
     mock-sync-failure-rate: 0.005
+    callback-executor-threads: 500
 
 # Resilience4j configuration
 resilience4j:

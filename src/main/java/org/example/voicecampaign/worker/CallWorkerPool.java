@@ -20,6 +20,20 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Fixed-size thread pool that processes calls from the Redis queue.
+ * 
+ * <p>Workers continuously poll the Redis queue for call IDs, fetch call details from the database,
+ * and execute calls via the telephony service. Supports graceful shutdown with configurable
+ * drain timeout.</p>
+ * 
+ * <p>Key responsibilities:</p>
+ * <ul>
+ *   <li>Maintain a pool of worker threads for concurrent call processing</li>
+ *   <li>Track active worker count for metrics and graceful shutdown</li>
+ *   <li>Manage per-campaign queued counts and active slots</li>
+ * </ul>
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -35,6 +49,12 @@ public class CallWorkerPool {
 
     @Value("${voice-campaign.worker.queue-poll-timeout-ms:1000}")
     private long queuePollTimeoutMs;
+
+    @Value("${voice-campaign.worker.shutdown-wait-seconds:60}")
+    private int shutdownWaitSeconds;
+
+    @Value("${voice-campaign.worker.shutdown-termination-seconds:10}")
+    private int shutdownTerminationSeconds;
 
     private static final String CALL_QUEUE_KEY = "call:queue";
     private static final String WORKER_ACTIVE_COUNT_KEY = "worker:active_count";
@@ -67,10 +87,9 @@ public class CallWorkerPool {
         // 1. Stop accepting new work
         running.set(false);
         
-        // 2. Wait for in-flight calls to complete (up to 60 seconds)
-        int maxWaitSeconds = 60;
+        // 2. Wait for in-flight calls to complete
         int waited = 0;
-        while (activeWorkers.get() > 0 && waited < maxWaitSeconds) {
+        while (activeWorkers.get() > 0 && waited < shutdownWaitSeconds) {
             log.info("Waiting for {} active workers to complete...", activeWorkers.get());
             try {
                 Thread.sleep(1000);
@@ -88,7 +107,7 @@ public class CallWorkerPool {
         // 3. Shutdown the thread pool
         workerPool.shutdown();
         try {
-            if (!workerPool.awaitTermination(10, TimeUnit.SECONDS)) {
+            if (!workerPool.awaitTermination(shutdownTerminationSeconds, TimeUnit.SECONDS)) {
                 log.warn("Workers did not terminate in time, forcing shutdown");
                 workerPool.shutdownNow();
             }
@@ -137,12 +156,7 @@ public class CallWorkerPool {
     }
 
     private void processCall(int workerId, UUID callRequestId) {
-        long startTime = System.currentTimeMillis();
-        
-        // Time DB fetch
-        long dbStart = System.currentTimeMillis();
         Optional<CallRequest> callRequestOpt = callRequestRepository.findByIdWithCampaign(callRequestId);
-        long dbTime = System.currentTimeMillis() - dbStart;
         
         if (callRequestOpt.isEmpty()) {
             log.warn("Worker {} call {} not found, skipping", workerId, callRequestId);
@@ -152,25 +166,14 @@ public class CallWorkerPool {
         CallRequest callRequest = callRequestOpt.get();
         UUID campaignId = callRequest.getCampaign().getId();
         
-        // Time Redis operations
-        long redisStart = System.currentTimeMillis();
         decrementQueuedCount(campaignId);
         metricsService.incrementActiveSlots(campaignId);
-        long redisTime = System.currentTimeMillis() - redisStart;
         
-        // Time call execution
-        long execStart = System.currentTimeMillis();
         try {
             callService.executeCall(callRequest);
         } catch (Exception e) {
             log.error("Worker {} failed to execute call {}: {}", workerId, callRequestId, e.getMessage());
             metricsService.releaseSlot(campaignId);
-        }
-        long execTime = System.currentTimeMillis() - execStart;
-        
-        long totalTime = System.currentTimeMillis() - startTime;
-        if (totalTime > 100) { // Log slow calls (>100ms)
-            log.warn("SLOW CALL: total={}ms, db={}ms, redis={}ms, exec={}ms", totalTime, dbTime, redisTime, execTime);
         }
     }
     
@@ -183,7 +186,9 @@ public class CallWorkerPool {
     }
 
     /**
-     * Enqueue a call request for processing by the worker pool
+     * Enqueues a call request ID to the Redis queue for worker processing.
+     * 
+     * @param callRequestId the UUID of the call request to enqueue
      */
     public void enqueueCall(UUID callRequestId) {
         redisTemplate.opsForList().leftPush(CALL_QUEUE_KEY, callRequestId.toString());
@@ -191,7 +196,9 @@ public class CallWorkerPool {
     }
 
     /**
-     * Get the current queue depth
+     * Returns the current number of call IDs waiting in the Redis queue.
+     * 
+     * @return the queue depth
      */
     public long getQueueDepth() {
         Long size = redisTemplate.opsForList().size(CALL_QUEUE_KEY);
@@ -199,14 +206,18 @@ public class CallWorkerPool {
     }
 
     /**
-     * Get the number of currently active workers
+     * Returns the number of workers currently processing calls.
+     * 
+     * @return the active worker count
      */
     public int getActiveWorkerCount() {
         return activeWorkers.get();
     }
 
     /**
-     * Get the total worker pool size
+     * Returns the configured worker pool size.
+     * 
+     * @return the total number of worker threads
      */
     public int getPoolSize() {
         return poolSize;

@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.example.voicecampaign.exception.CallNotFoundException;
 
 import java.time.Instant;
 import java.util.Optional;
@@ -92,7 +93,7 @@ public class CallService {
                 metricsService.releaseSlot(campaign.getId());
             } else {
                 // Call initiation failed - handle as sync failure (which releases slot)
-                handleSyncFailure(callRequest, e.getMessage());
+                handleSyncFailure(callRequest.getId(), campaign.getId(), e.getMessage());
             }
         }
     }
@@ -100,14 +101,19 @@ public class CallService {
     @Transactional
     public void saveCallInProgress(UUID callRequestId, String externalCallId, long callbackTimeoutMs) {
         CallRequest callRequest = callRequestRepository.findById(callRequestId)
-                .orElseThrow(() -> new RuntimeException("Call request not found: " + callRequestId));
+                .orElseThrow(() -> new CallNotFoundException(callRequestId));
         Instant expectedCallbackBy = Instant.now().plusMillis(callbackTimeoutMs);
         callRequest.markInProgress(externalCallId, expectedCallbackBy);
         callRequestRepository.save(callRequest);
     }
 
-    private void handleSyncFailure(CallRequest callRequest, String reason) {
+    @Transactional
+    public void handleSyncFailure(UUID callRequestId, UUID campaignId, String reason) {
+        // Re-fetch entity to ensure it's attached to the current persistence context
+        CallRequest callRequest = callRequestRepository.findByIdWithCampaign(callRequestId)
+                .orElseThrow(() -> new CallNotFoundException(callRequestId));
         Campaign campaign = callRequest.getCampaign();
+        
         int maxRetries = campaign.getRetryConfig() != null 
                 ? campaign.getRetryConfig().getMaxRetries() 
                 : 3;
@@ -129,7 +135,7 @@ public class CallService {
                     callRequest.getId(), callRequest.getRetryCount());
         }
 
-        metricsService.releaseSlot(campaign.getId());
+        metricsService.releaseSlot(campaignId);
         callRequestRepository.save(callRequest);
     }
 

@@ -12,6 +12,7 @@ import org.example.voicecampaign.dto.BatchImportResponse;
 import org.example.voicecampaign.dto.CampaignCreateRequest;
 import org.example.voicecampaign.dto.CampaignResponse;
 import org.example.voicecampaign.dto.CallResponse;
+import org.example.voicecampaign.exception.CallNotFoundException;
 import org.example.voicecampaign.exception.CampaignNotFoundException;
 import org.example.voicecampaign.exception.InvalidOperationException;
 import org.example.voicecampaign.repository.CallRequestRepository;
@@ -37,7 +38,8 @@ public class CampaignService {
     private final CallRequestRepository callRequestRepository;
     private final CampaignMetricsService metricsService;
 
-    private static final int BATCH_SIZE = 1000;
+    @org.springframework.beans.factory.annotation.Value("${voice-campaign.import.batch-size:1000}")
+    private int batchSize;
     private static final Pattern PHONE_PATTERN = Pattern.compile("^\\+?[1-9]\\d{6,14}$");
 
     @Transactional
@@ -81,7 +83,7 @@ public class CampaignService {
             }
             
             // Validate phone number format
-            if (!isValidPhoneNumber(normalizedPhone)) {
+            if (isInvalidPhoneNumber(normalizedPhone)) {
                 log.debug("Invalid phone number skipped: {}", normalizedPhone);
                 invalidCount++;
                 continue;
@@ -101,7 +103,7 @@ public class CampaignService {
                     .build();
             callRequests.add(callRequest);
 
-            if (callRequests.size() >= BATCH_SIZE) {
+            if (callRequests.size() >= batchSize) {
                 callRequestRepository.saveAll(callRequests);
                 callRequests.clear();
             }
@@ -145,7 +147,13 @@ public class CampaignService {
 
     @Transactional(readOnly = true)
     public List<CampaignResponse> getAllCampaigns() {
-        return campaignRepository.findAll().stream()
+        return getAllCampaigns(0, 100);
+    }
+
+    @Transactional(readOnly = true)
+    public List<CampaignResponse> getAllCampaigns(int page, int size) {
+        int maxSize = Math.min(size, 100);
+        return campaignRepository.findAll(PageRequest.of(page, maxSize)).stream()
                 .map(this::mapToResponse)
                 .toList();
     }
@@ -241,7 +249,7 @@ public class CampaignService {
     @Transactional(readOnly = true)
     public CallResponse getCallStatus(UUID callId) {
         CallRequest callRequest = callRequestRepository.findById(callId)
-                .orElseThrow(() -> new RuntimeException("Call not found: " + callId));
+                .orElseThrow(() -> new CallNotFoundException(callId));
         return mapToCallResponse(callRequest);
     }
 
@@ -323,10 +331,8 @@ public class CampaignService {
             throw new InvalidOperationException("Cannot import to campaign with status: " + campaign.getStatus());
         }
 
-        // Get existing phone numbers to check for duplicates
-        Set<String> existingPhones = new HashSet<>(
-                callRequestRepository.findPhoneNumbersByCampaignId(campaignId)
-        );
+        // Track phones seen in this batch to avoid duplicates within the request
+        Set<String> seenInBatch = new HashSet<>();
 
         int totalReceived = phoneNumbers.size();
         int duplicatesSkipped = 0;
@@ -334,21 +340,33 @@ public class CampaignService {
         List<CallRequest> callRequests = new ArrayList<>();
 
         for (String phone : phoneNumbers) {
-            String normalizedPhone = phone.trim();
+            String normalizedPhone = normalizePhoneNumber(phone);
+            
+            // Skip empty/whitespace-only entries
+            if (normalizedPhone.isEmpty()) {
+                invalidSkipped++;
+                continue;
+            }
             
             // Validate phone number format
-            if (!isValidPhoneNumber(normalizedPhone)) {
+            if (isInvalidPhoneNumber(normalizedPhone)) {
                 invalidSkipped++;
                 continue;
             }
 
-            // Check for duplicates
-            if (existingPhones.contains(normalizedPhone)) {
+            // Check for duplicates within this batch
+            if (seenInBatch.contains(normalizedPhone)) {
+                duplicatesSkipped++;
+                continue;
+            }
+            
+            // Check for duplicates in database (efficient single-row check)
+            if (callRequestRepository.existsByCampaignIdAndPhoneNumber(campaignId, normalizedPhone)) {
                 duplicatesSkipped++;
                 continue;
             }
 
-            existingPhones.add(normalizedPhone);
+            seenInBatch.add(normalizedPhone);
             
             CallRequest callRequest = CallRequest.builder()
                     .campaign(campaign)
@@ -358,10 +376,10 @@ public class CampaignService {
             callRequests.add(callRequest);
 
             // Batch save
-            if (callRequests.size() >= BATCH_SIZE) {
+            if (callRequests.size() >= batchSize) {
                 callRequestRepository.saveAll(callRequests);
                 callRequests.clear();
-                log.debug("Saved batch of {} phone numbers for campaign {}", BATCH_SIZE, campaignId);
+                log.debug("Saved batch of {} phone numbers for campaign {}", batchSize, campaignId);
             }
         }
 
@@ -383,10 +401,10 @@ public class CampaignService {
                 .build();
     }
 
-    private boolean isValidPhoneNumber(String phone) {
+    private boolean isInvalidPhoneNumber(String phone) {
         if (phone == null || phone.isEmpty()) {
-            return false;
+            return true;
         }
-        return PHONE_PATTERN.matcher(phone).matches();
+        return !PHONE_PATTERN.matcher(phone).matches();
     }
 }

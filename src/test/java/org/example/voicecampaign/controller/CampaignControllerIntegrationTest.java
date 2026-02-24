@@ -2,7 +2,6 @@ package org.example.voicecampaign.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.example.voicecampaign.dto.CampaignCreateRequest;
-import org.example.voicecampaign.service.CampaignMetricsService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;

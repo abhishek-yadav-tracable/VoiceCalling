@@ -23,6 +23,13 @@ public class GlobalExceptionHandler {
                 .body(new ErrorResponse(HttpStatus.NOT_FOUND.value(), ex.getMessage(), Instant.now()));
     }
 
+    @ExceptionHandler(CallNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleCallNotFound(CallNotFoundException ex) {
+        log.warn("Call not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ErrorResponse(HttpStatus.NOT_FOUND.value(), ex.getMessage(), Instant.now()));
+    }
+
     @ExceptionHandler(InvalidOperationException.class)
     public ResponseEntity<ErrorResponse> handleInvalidOperation(InvalidOperationException ex) {
         log.warn("Invalid operation: {}", ex.getMessage());
