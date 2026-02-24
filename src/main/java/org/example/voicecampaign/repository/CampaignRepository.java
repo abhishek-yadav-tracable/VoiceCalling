@@ -17,7 +17,7 @@ public interface CampaignRepository extends JpaRepository<Campaign, UUID> {
     @Query("SELECT c FROM Campaign c WHERE c.status IN :statuses ORDER BY c.priority DESC, c.createdAt ASC")
     List<Campaign> findActiveCampaigns(List<CampaignStatus> statuses);
     
-    @Query("SELECT c FROM Campaign c WHERE c.status = 'IN_PROGRESS' OR c.status = 'PENDING'")
+    @Query("SELECT c FROM Campaign c WHERE c.status = 'IN_PROGRESS' OR c.status = 'PENDING' ORDER BY c.priority DESC, c.createdAt ASC")
     List<Campaign> findSchedulableCampaigns();
 
     long countByStatus(CampaignStatus status);

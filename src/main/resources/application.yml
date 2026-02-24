@@ -49,6 +49,7 @@ voice-campaign:
     enabled: true
     fixed-rate-ms: 100
     batch-size: 10000
+    strategy: round-robin  # Options: round-robin, priority, remaining-calls
   
   watchdog:
     fixed-rate-ms: 30000

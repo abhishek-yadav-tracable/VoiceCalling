@@ -1,12 +1,15 @@
 package org.example.voicecampaign.scheduler;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.example.voicecampaign.domain.entity.CallRequest;
 import org.example.voicecampaign.domain.entity.Campaign;
+import org.example.voicecampaign.domain.model.CallStatus;
 import org.example.voicecampaign.domain.model.CampaignStatus;
 import org.example.voicecampaign.repository.CallRequestRepository;
 import org.example.voicecampaign.repository.CampaignRepository;
+import org.example.voicecampaign.scheduler.strategy.SchedulingContext;
+import org.example.voicecampaign.scheduler.strategy.SchedulingStrategy;
+import org.example.voicecampaign.scheduler.strategy.SchedulingStrategyFactory;
 import org.example.voicecampaign.service.CampaignMetricsService;
 import org.example.voicecampaign.worker.CallWorkerPool;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,7 +19,9 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -34,7 +39,6 @@ import java.util.UUID;
  * </ul>
  */
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class CallQueueService {
 
@@ -43,6 +47,7 @@ public class CallQueueService {
     private final CampaignMetricsService metricsService;
     private final CallWorkerPool workerPool;
     private final StringRedisTemplate redisTemplate;
+    private final SchedulingStrategyFactory strategyFactory;
 
     @Value("${voice-campaign.scheduler.enabled:true}")
     private boolean schedulerEnabled;
@@ -54,6 +59,21 @@ public class CallQueueService {
     private int maxQueueDepth;
 
     private static final String CAMPAIGN_QUEUED_KEY = "campaign:%s:queued";
+
+    public CallQueueService(
+            CampaignRepository campaignRepository,
+            CallRequestRepository callRequestRepository,
+            CampaignMetricsService metricsService,
+            CallWorkerPool workerPool,
+            StringRedisTemplate redisTemplate,
+            SchedulingStrategyFactory strategyFactory) {
+        this.campaignRepository = campaignRepository;
+        this.callRequestRepository = callRequestRepository;
+        this.metricsService = metricsService;
+        this.workerPool = workerPool;
+        this.redisTemplate = redisTemplate;
+        this.strategyFactory = strategyFactory;
+    }
 
     /**
      * Scheduled task that enqueues calls from active campaigns to the Redis queue.
@@ -99,17 +119,46 @@ public class CallQueueService {
             return;
         }
 
-        // Fair distribution: round-robin across campaigns
-        int campaignsCount = eligibleCampaigns.size();
-        int callsPerCampaign = Math.max(1, slotsToFill / campaignsCount);
+        // Build scheduling context with metrics for each campaign
+        SchedulingContext context = buildSchedulingContext(eligibleCampaigns);
+
+        // Use pluggable strategy for slot distribution
+        SchedulingStrategy strategy = strategyFactory.getStrategy();
+        Map<Campaign, Integer> allocation = strategy.distribute(eligibleCampaigns, slotsToFill, context);
         
-        for (Campaign campaign : eligibleCampaigns) {
+        for (Map.Entry<Campaign, Integer> entry : allocation.entrySet()) {
+            Campaign campaign = entry.getKey();
+            int allocatedSlots = entry.getValue();
             try {
-                enqueueCallsForCampaign(campaign, callsPerCampaign);
+                enqueueCallsForCampaign(campaign, allocatedSlots);
             } catch (Exception e) {
                 log.error("Error enqueuing calls for campaign {}: {}", campaign.getId(), e.getMessage());
             }
         }
+    }
+
+    private SchedulingContext buildSchedulingContext(List<Campaign> campaigns) {
+        Map<UUID, Long> remainingCalls = new HashMap<>();
+        Map<UUID, Integer> activeSlots = new HashMap<>();
+        Map<UUID, Integer> queuedCounts = new HashMap<>();
+
+        for (Campaign campaign : campaigns) {
+            UUID id = campaign.getId();
+            
+            // Count remaining calls (PENDING + FAILED that can be retried)
+            long pending = callRequestRepository.countByCampaignIdAndStatus(id, CallStatus.PENDING);
+            long failed = callRequestRepository.countByCampaignIdAndStatus(id, CallStatus.FAILED);
+            remainingCalls.put(id, pending + failed);
+            
+            activeSlots.put(id, metricsService.getActiveSlots(id));
+            queuedCounts.put(id, getQueuedCount(id));
+        }
+
+        return SchedulingContext.builder()
+                .remainingCallsPerCampaign(remainingCalls)
+                .activeSlotsPerCampaign(activeSlots)
+                .queuedCountPerCampaign(queuedCounts)
+                .build();
     }
 
     @org.springframework.transaction.annotation.Transactional

@@ -18,7 +18,8 @@ import java.util.UUID;
     @Index(name = "idx_call_campaign_status", columnList = "campaign_id, status"),
     @Index(name = "idx_call_status_retry", columnList = "status, retry_count, next_retry_at"),
     @Index(name = "idx_call_expected_callback", columnList = "status, expected_callback_by"),
-    @Index(name = "idx_call_external_id", columnList = "externalCallId")
+    @Index(name = "idx_call_external_id", columnList = "externalCallId"),
+    @Index(name = "idx_call_campaign_phone", columnList = "campaign_id, phone_number")
 })
 @Getter
 @Setter
